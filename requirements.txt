@@ -1,0 +1,15 @@
+# Phase 1 dependencies.
+# Phase 1 was NOT trained on the GCP VM. Exact training environment versions
+# are unknown, but outputs (predictions.csv, plots) are committed to the repo.
+# These versions are from the local dev machine and should produce near-identical results.
+pandas>=2.0
+numpy>=1.24
+matplotlib>=3.7
+seaborn>=0.12
+scipy>=1.10
+scikit-learn>=1.3
+lightgbm>=4.0
+xgboost>=2.0
+shap>=0.42
+markdown2>=2.4
+playwright>=1.40

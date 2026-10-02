@@ -1,0 +1,67 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Data files (too large for git, provided by RBIH)
+data/*.csv
+data/*.parquet
+*.csv.gz
+
+# Playwright
+.playwright-mcp/
+
+# Claude Code
+.claude/
+
+# Temporary files
+*.tmp
+*.bak
+*.log
+
+# Large generated files (regenerate with src/md_to_html.py + Playwright)
+reports/NFPC_Phase1_EDA_Report.html
+reports/pdf/
+
+# LinkedIn post (personal, not project artifact)
+linkedin-post.txt
+
+# Next.js
+web/.next/
+web/out/
+web/node_modules/
+
+# Phase 2 pipeline artifacts (large, regenerable)
+round-2/pipeline/output/
+round-2/pipeline/submission*.csv
+round-2/code_submission.zip
+round-2/report_b64.txt
+round-2/submissions/
+round-2/deliverables/nfpc-phase2-code.zip
+
+# Vercel
+.vercel
+
+# npm (pnpm is used)
+web/package-lock.json
