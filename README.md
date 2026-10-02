@@ -248,13 +248,7 @@ nfpc-mule-detection/
 
 ---
 
-## 👥 Acknowledgements
-
-- Built for the **National Fraud Prevention Challenge (NFPC)** hosted by **Reserve Bank Innovation Hub (RBIH)** in association with **IIT Delhi TRYST**.
-- Upstream solution architecture and research foundation by Team **dmj.one**.
-
----
-
 ## 📄 License
 
 This project is licensed under the [MIT License](LICENSE).
+
