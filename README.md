@@ -108,6 +108,44 @@ flowchart TD
 
 ---
 
+## 📈 Visual Outputs & Analytics
+
+### 1. Model Evaluation & Performance Curves
+Comprehensive evaluation including ROC curves, Precision-Recall curves, and classification diagnostics:
+
+![Model Evaluation](reports/plots/18_model_evaluation.png)
+
+---
+
+### 2. Feature Importance & SHAP Explainability
+Global feature importance rankings and SHAP summary distributions highlighting top mule predictive signals:
+
+| Feature Importance Ranking | SHAP Summary Plot |
+| :---: | :---: |
+| ![Feature Importance](reports/plots/17_feature_importance.png) | ![SHAP Summary](reports/plots/19_shap_summary.png) |
+
+---
+
+### 3. Network Topology & Graph Relationships
+Visualizing counterparty connections, money movement hubs, and high-risk account clusters:
+
+![Network Topology](reports/plots/23_network_topology.png)
+
+---
+
+### 4. Behavioral Typologies & Temporal Dynamics
+Analysis of transaction velocity spikes, structurings/smurfing, and night/weekend transaction patterns:
+
+| Temporal Patterns & Bursts | Transaction Velocity Dynamics |
+| :---: | :---: |
+| ![Temporal Patterns](reports/plots/09_temporal_patterns.png) | ![Velocity](reports/plots/15_velocity.png) |
+
+| Structuring & Smurfing Patterns | Cost-Sensitive Decision Matrix |
+| :---: | :---: |
+| ![Structuring](reports/plots/11_structuring.png) | ![Cost Sensitive Matrix](reports/plots/25_cost_sensitive_matrix.png) |
+
+---
+
 ## 🎯 Key Behavioral Signals & Feature Taxonomy
 
 The pipeline extracts **208 engineered features** capturing distinctive mule typologies:
