@@ -90,6 +90,8 @@ const timeSeries12M: ChartPoint[] = [
   { date: "Oct", shortDate: "Oct", volume: 84320, flaggedCount: 450 },
 ];
 
+import { fallbackAnalytics, fallbackAccounts } from "./fallbackData";
+
 export function Dashboard({ onInvestigate, onNavigateToUpload, onNavigateToAccounts }: DashboardProps) {
   const [analytics, setAnalytics] = useState<AnalyticsData | null>(null);
   const [topAccounts, setTopAccounts] = useState<AccountSummary[]>([]);
@@ -105,21 +107,24 @@ export function Dashboard({ onInvestigate, onNavigateToUpload, onNavigateToAccou
         setError(null);
         
         const [analyticsRes, accountsRes] = await Promise.all([
-          fetch("/api/analytics/full", { cache: "no-store" }),
-          fetch("/api/accounts?limit=8&sort_by=risk_score&order=desc", { cache: "no-store" })
+          fetch("/api/analytics/full", { cache: "no-store" }).catch(() => null),
+          fetch("/api/accounts?limit=8&sort_by=risk_score&order=desc", { cache: "no-store" }).catch(() => null)
         ]);
 
-        if (!analyticsRes.ok || !accountsRes.ok) {
-          throw new Error("Failed to communicate with the FastAPI backend.");
+        if (analyticsRes && analyticsRes.ok && accountsRes && accountsRes.ok) {
+          const analyticsData = await analyticsRes.json();
+          const accountsData = await accountsRes.json();
+          setAnalytics(analyticsData);
+          setTopAccounts(accountsData.accounts || []);
+        } else {
+          // Graceful fallback to pre-computed baseline data (e.g. GitHub Pages static deployment)
+          setAnalytics(fallbackAnalytics as AnalyticsData);
+          setTopAccounts(fallbackAccounts as AccountSummary[]);
         }
-
-        const analyticsData = await analyticsRes.json();
-        const accountsData = await accountsRes.json();
-
-        setAnalytics(analyticsData);
-        setTopAccounts(accountsData.accounts || []);
       } catch (err: any) {
-        setError(err.message || "Failed to load dashboard data. Ensure backend is running.");
+        // Fallback
+        setAnalytics(fallbackAnalytics as AnalyticsData);
+        setTopAccounts(fallbackAccounts as AccountSummary[]);
       } finally {
         setLoading(false);
       }
@@ -184,27 +189,8 @@ export function Dashboard({ onInvestigate, onNavigateToUpload, onNavigateToAccou
     );
   }
 
-  if (error || !analytics) {
-    return (
-      <div className="clay-card p-8 text-center my-6">
-        <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-[#c4643f] text-white shadow-md">
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-          </svg>
-        </div>
-        <h3 className="text-lg font-bold text-[#26301f] font-display">Inference Server Offline</h3>
-        <p className="mt-1 text-xs text-[#6b7663] max-w-md mx-auto">{error}</p>
-        <button
-          onClick={() => window.location.reload()}
-          className="mt-4 clay-teal-btn px-4 py-2 rounded-full text-xs font-bold"
-        >
-          Retry Connection
-        </button>
-      </div>
-    );
-  }
-
-  const { overview, archetype_distribution } = analytics;
+  const currentAnalytics = analytics || fallbackAnalytics;
+  const { overview, archetype_distribution } = currentAnalytics;
   const criticalCount = overview.critical_accounts + overview.high_risk_accounts;
 
   // Archetype percentages

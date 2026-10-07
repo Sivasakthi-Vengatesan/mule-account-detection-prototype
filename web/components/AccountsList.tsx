@@ -17,6 +17,8 @@ interface AccountsListProps {
   onInvestigate: (accountId: string) => void;
 }
 
+import { fallbackAccounts } from "./fallbackData";
+
 export function AccountsList({ onInvestigate }: AccountsListProps) {
   const [accounts, setAccounts] = useState<AccountSummary[]>([]);
   const [total, setTotal] = useState(0);
@@ -42,14 +44,31 @@ export function AccountsList({ onInvestigate }: AccountsListProps) {
         if (riskFilter) params.append("risk_level", riskFilter);
         if (search.trim()) params.append("search", search.trim());
 
-        const res = await fetch(`/api/accounts?${params.toString()}`);
-        if (!res.ok) throw new Error("Failed to load accounts");
-
-        const data = await res.json();
-        setAccounts(data.accounts || []);
-        setTotal(data.total || 0);
+        const res = await fetch(`/api/accounts?${params.toString()}`).catch(() => null);
+        if (res && res.ok) {
+          const data = await res.json();
+          setAccounts(data.accounts || []);
+          setTotal(data.total || 0);
+        } else {
+          // Client-side fallback filtering
+          let filtered = [...(fallbackAccounts as AccountSummary[])];
+          if (riskFilter) {
+            filtered = filtered.filter((a) => a.risk_level === riskFilter);
+          }
+          if (search.trim()) {
+            const q = search.trim().toLowerCase();
+            filtered = filtered.filter((a) => a.account_id.toLowerCase().includes(q));
+          }
+          setAccounts(filtered);
+          setTotal(filtered.length);
+        }
       } catch (err) {
-        console.error("Error fetching accounts:", err);
+        let filtered = [...(fallbackAccounts as AccountSummary[])];
+        if (riskFilter) {
+          filtered = filtered.filter((a) => a.risk_level === riskFilter);
+        }
+        setAccounts(filtered);
+        setTotal(filtered.length);
       } finally {
         setLoading(false);
       }

@@ -47,6 +47,8 @@ interface AccountInvestigationProps {
   onBack: () => void;
 }
 
+import { getFallbackAccountDetail } from "./fallbackData";
+
 export function AccountInvestigation({ accountId, onBack }: AccountInvestigationProps) {
   const [data, setData] = useState<AccountDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -57,14 +59,18 @@ export function AccountInvestigation({ accountId, onBack }: AccountInvestigation
       try {
         setLoading(true);
         setError(null);
-        const res = await fetch(`/api/accounts/${accountId}`);
-        if (!res.ok) {
-          throw new Error(`Account '${accountId}' not found.`);
+        const res = await fetch(`/api/accounts/${accountId}`).catch(() => null);
+        if (res && res.ok) {
+          const json = await res.json();
+          setData(json);
+        } else {
+          // Use client fallback data
+          const fallback = getFallbackAccountDetail(accountId);
+          setData(fallback as AccountDetail);
         }
-        const json = await res.json();
-        setData(json);
       } catch (err: any) {
-        setError(err.message || "Failed to load account investigation data.");
+        const fallback = getFallbackAccountDetail(accountId);
+        setData(fallback as AccountDetail);
       } finally {
         setLoading(false);
       }
