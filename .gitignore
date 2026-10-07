@@ -6,11 +6,17 @@ __pycache__/
 dist/
 build/
 *.egg
+.pytest_cache/
 
 # Virtual environments
 .venv/
 venv/
 env/
+
+# Database
+backend/mule_detection.db
+*.db
+*.sqlite3
 
 # IDE
 .vscode/
@@ -40,19 +46,12 @@ data/*.parquet
 *.bak
 *.log
 
-# Large generated files (regenerate with src/md_to_html.py + Playwright)
-reports/NFPC_Phase1_EDA_Report.html
-reports/pdf/
-
-# LinkedIn post (personal, not project artifact)
-linkedin-post.txt
-
 # Next.js
 web/.next/
 web/out/
 web/node_modules/
 
-# Phase 2 pipeline artifacts (large, regenerable)
+# Phase 2 pipeline artifacts
 round-2/pipeline/output/
 round-2/pipeline/submission*.csv
 round-2/code_submission.zip

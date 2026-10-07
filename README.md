@@ -1,22 +1,7 @@
----
-title: NFPC Mule Account Detection
-emoji: 🏦
-colorFrom: blue
-colorTo: emerald
-tags:
-  - fraud-detection
-  - aml
-  - money-mule
-  - rbih
-  - lightgbm
-  - xgboost
-  - catboost
-  - nextjs
----
-
-# NFPC Mule Account Detection 🏦🛡️
+# Mule Account Detection Platform 🏦🛡️
 
 [![Python](https://img.shields.io/badge/Python-3.11%20%7C%203.12%20%7C%203.13-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-009688?logo=fastapi&logoColor=white)](backend/)
 [![Next.js](https://img.shields.io/badge/Next.js-16.1.6-000000?logo=next.js&logoColor=white)](web/)
 [![LightGBM](https://img.shields.io/badge/LightGBM-4.x-brightgreen)](https://lightgbm.readthedocs.io/)
 [![XGBoost](https://img.shields.io/badge/XGBoost-3.x-orange)](https://xgboost.readthedocs.io/)
@@ -25,230 +10,225 @@ tags:
 [![Private AUC-ROC](https://img.shields.io/badge/Private%20AUC--ROC-0.9558-indigo)](results/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-An end-to-end **Money Mule Account Detection & Risk Scoring System** developed for the **National Fraud Prevention Challenge (NFPC)** (hosted by **Reserve Bank Innovation Hub (RBIH)** in association with **IIT Delhi TRYST**).
+An analyst-facing, end-to-end **Money Mule Account Detection, Risk Triage & Explainability System** developed for the **National Fraud Prevention Challenge (NFPC)** (organized by the **Reserve Bank Innovation Hub (RBIH)** and **IIT Delhi TRYST**).
 
-The solution features a 3-model gradient-boosted ensemble (LightGBM + XGBoost + CatBoost) with 208 engineered features, confident learning for label noise correction, and an interactive Next.js analytics showcase.
-
----
-
-## ⚡ Executive Summary & Results
-
-In digital payment networks, illicit money is funneled through layers of mule accounts to obscure transaction trails. This repository implements an end-to-end machine learning pipeline to identify mule accounts from large-scale banking data.
-
-### 🏆 Challenge Performance
-
-| Phase | Evaluation Partition | Metric | Score | Key Components |
-| :--- | :--- | :--- | :---: | :--- |
-| **Phase 2 (Final)** | **Public Leaderboard** | **AUC-ROC** | **0.968136** | 3-Model Ensemble (LGBM + XGB + CatBoost), 208 features |
-| **Phase 2 (Final)** | **Private Leaderboard** | **AUC-ROC** | **0.955815** | 3-seed × 5-fold CV, rank averaging, confident learning |
-| **Phase 1** | **Out-of-Fold (OOF)** | **AUC-ROC** | **0.985100** | 125 features across 13 behavioral categories |
+The platform transforms research-grade gradient-boosted models into an interactive, investigation-ready application following the operational lifecycle:
+$$\text{UPLOAD} \longrightarrow \text{DETECT} \longrightarrow \text{RANK} \longrightarrow \text{INVESTIGATE} \longrightarrow \text{EXPLAIN} \longrightarrow \text{VISUALIZE}$$
 
 ---
 
 ## 🏗️ End-to-End System Architecture
 
-```mermaid
-flowchart TD
-    subgraph INGEST["1. Data Ingestion & Partitioning"]
-        RAW_CUST["Customer Demographics<br/>(Age, Risk, Occupation, KYC)"]
-        RAW_TX["Transaction Streams<br/>(Amounts, Timestamps, Types, Channels)"]
-        RAW_DEV["Device & IP Logs<br/>(Fingerprints, Geolocation, Logins)"]
-    end
-
-    subgraph FEAT_ENG["2. 4-Pass Feature Engineering (208 Features)"]
-        PASS1["Pass 1: Transaction Velocity & Burst Ratios"]
-        PASS2["Pass 2: Flow-Through & Turnover Metrics"]
-        PASS3["Pass 3: Counterparty Dispersion & Entropies"]
-        PASS4["Pass 4: Temporal Night/Weekend & Rapid Pass-Through"]
-    end
-
-    subgraph NOISE["3. Label Cleaning & Robustness"]
-        CONF_LEARN["Confident Learning Engine<br/>(Identifies Mislabeled Mules / False Positives)"]
-        HEURISTIC["Heuristic Red-Herring Filtering"]
-    end
-
-    subgraph ENSEMBLE["4. 3-Model Ensemble Engine"]
-        LGBM["LightGBM Classifier<br/>(5-Fold CV × 3 Random Seeds)"]
-        XGB["XGBoost Classifier<br/>(5-Fold CV × 3 Random Seeds)"]
-        CAT["CatBoost Classifier<br/>(5-Fold CV × 3 Random Seeds)"]
-        RANK_AVG["Rank-Averaged Probability Aggregator"]
-    end
-
-    subgraph APPS["5. Deliverables & Web Interface"]
-        CSV_OUT["Ranked Test Account Predictions<br/>(models/predictions.csv)"]
-        SHOWCASE["Interactive Next.js Showcase Site<br/>(web/ & static-site/)"]
-        PITCH["Competition Pitch Deck<br/>(static-site/pitch.html)"]
-    end
-
-    RAW_CUST --> PASS1
-    RAW_TX --> PASS1
-    RAW_DEV --> PASS1
-
-    PASS1 --> PASS2 --> PASS3 --> PASS4
-    PASS4 --> CONF_LEARN --> HEURISTIC
-
-    HEURISTIC --> LGBM
-    HEURISTIC --> XGB
-    HEURISTIC --> CAT
-
-    LGBM --> RANK_AVG
-    XGB --> RANK_AVG
-    CAT --> RANK_AVG
-
-    RANK_AVG --> CSV_OUT
-    RANK_AVG --> SHOWCASE
-    RANK_AVG --> PITCH
-
-    style INGEST fill:#1e293b,stroke:#3b82f6,stroke-width:2px,color:#fff
-    style FEAT_ENG fill:#1e1e2e,stroke:#10b981,stroke-width:2px,color:#fff
-    style NOISE fill:#1e293b,stroke:#f59e0b,stroke-width:2px,color:#fff
-    style ENSEMBLE fill:#1e1e2e,stroke:#8b5cf6,stroke-width:2px,color:#fff
-    style APPS fill:#0f172a,stroke:#06b6d4,stroke-width:2px,color:#fff
+```
+Raw CSV / Transactions
+        ↓
+Data Validation (Schema & Typings)
+        ↓
+Feature Engineering (Velocity, Pass-Through, Structuring, Entropies, Graph Centrality)
+        ↓
+┌────────────────────────────────────────────────────────┐
+│  Multi-Model Ensemble Engine                           │
+│  ├─ LightGBM Booster                                   │
+│  ├─ XGBoost Booster                                    │
+│  └─ CatBoost Classifier                                │
+└────────────────────────────────────────────────────────┘
+        ↓
+Rank Averaging & Calibrated Probability Blending
+        ↓
+Mule Risk Probability (0.000 – 1.000) & Risk Score (0 – 100)
+        ↓
+Risk Classification Engine (LOW / MEDIUM / HIGH / CRITICAL)
+        ↓
+Explainability & Attribution (SHAP TreeExplainer + Natural Language Mapping)
+        ↓
+Behavioral Archetype Detection (Pass-Through, Structuring, Dormant-Burst, Network Hub)
+        ↓
+Persistent Storage (SQLite Local / PostgreSQL Production Abstracted via SQLAlchemy)
+        ↓
+Interactive Next.js Dashboard & Forensic Case Investigation Interface
 ```
 
 ---
 
-## 📈 Visual Outputs & Analytics
+## ⚡ Key Results & Research Metrics
 
-### 1. Model Evaluation & Performance Curves
-Comprehensive evaluation including ROC curves, Precision-Recall curves, and classification diagnostics:
-
-![Model Evaluation](reports/plots/18_model_evaluation.png)
-
----
-
-### 2. Feature Importance & SHAP Explainability
-Global feature importance rankings and SHAP summary distributions highlighting top mule predictive signals:
-
-| Feature Importance Ranking | SHAP Summary Plot |
-| :---: | :---: |
-| ![Feature Importance](reports/plots/17_feature_importance.png) | ![SHAP Summary](reports/plots/19_shap_summary.png) |
+| Evaluation Stage | Metric | Score | Key Components |
+| :--- | :---: | :---: | :--- |
+| **Phase 2 (Public Leaderboard)** | **AUC-ROC** | **0.968136** | 3-Model Ensemble (LightGBM + XGBoost + CatBoost), 208 features |
+| **Phase 2 (Private Leaderboard)** | **AUC-ROC** | **0.955815** | 3-seed × 5-fold CV, rank averaging, confident learning |
+| **Phase 1 (Out-of-Fold)** | **AUC-ROC** | **0.985100** | 125 features across 13 behavioral categories |
 
 ---
 
-### 3. Network Topology & Graph Relationships
-Visualizing counterparty connections, money movement hubs, and high-risk account clusters:
+## 🚀 Quickstart & Development Setup
 
-![Network Topology](reports/plots/23_network_topology.png)
+### Prerequisites
+- Python 3.11, 3.12, or 3.13
+- Node.js 20+ and npm / pnpm
 
----
-
-### 4. Behavioral Typologies & Temporal Dynamics
-Analysis of transaction velocity spikes, structurings/smurfing, and night/weekend transaction patterns:
-
-| Temporal Patterns & Bursts | Transaction Velocity Dynamics |
-| :---: | :---: |
-| ![Temporal Patterns](reports/plots/09_temporal_patterns.png) | ![Velocity](reports/plots/15_velocity.png) |
-
-| Structuring & Smurfing Patterns | Cost-Sensitive Decision Matrix |
-| :---: | :---: |
-| ![Structuring](reports/plots/11_structuring.png) | ![Cost Sensitive Matrix](reports/plots/25_cost_sensitive_matrix.png) |
-
----
-
-## 🎯 Key Behavioral Signals & Feature Taxonomy
-
-The pipeline extracts **208 engineered features** capturing distinctive mule typologies:
-
-```mermaid
-mindmap
-  root((Mule Detection Signals))
-    Flow-Through Dynamics
-      High credit-to-debit turnover within <24 hrs
-      Zero or negligible resting balance
-      Rapid drain ratios
-    Transaction Velocity
-      Spike in transaction counts vs historical median
-      High-frequency micro-credits followed by lump-sum debit
-      Off-hours / midnight burst operations
-    Network & Counterparties
-      High entropy of distinct senders to single beneficiary
-      New unverified counterparty proliferation
-      Cross-channel hops (UPI -> IMPS -> Cash ATM)
-    Device & Access Profiling
-      Multi-account logins from single device fingerprint
-      Frequent IP subnet / VPN switching
-      Short session durations during high-value transfers
-```
-
----
-
-## 🚀 Quick Start & Local Run
-
-### 1. Run the Interactive Web Showcase (Local Server)
-
-A standalone showcase site and pitch deck are pre-bundled:
-
+### 1. Backend Setup (FastAPI)
 ```bash
-# Serve the pre-built interactive dashboard
-python -m http.server 8080 --directory static-site
+cd backend
+pip install -r requirements.txt
+
+# Run test suite
+pytest -v
+
+# Start FastAPI development server
+python -m uvicorn main:app --reload --host 127.0.0.1 --port 8000
 ```
+Backend API will be accessible at `http://127.0.0.1:8000` (Interactive Swagger Docs at `http://127.0.0.1:8000/docs`).
 
-Visit in your browser:
-- **Main Showcase Dashboard:** [http://localhost:8080](http://localhost:8080)
-- **Competition Pitch Deck:** [http://localhost:8080/pitch.html](http://localhost:8080/pitch.html)
-
-### 2. Run the Next.js Web Application
-
+### 2. Frontend Setup (Next.js)
 ```bash
 cd web
-npm install
+npm install # or pnpm install
 npm run dev
 ```
-
-Visit: [http://localhost:3000](http://localhost:3000)
-
----
-
-## 📊 Precomputed Models & Outputs
-
-The repository includes pre-generated evaluation outputs:
-
-- **[`models/predictions.csv`](file:///C:/Users/sakth/.gemini/antigravity-ide/scratch/nfpc-mule-detection-main/models/predictions.csv):** 15,848 test accounts scored with probability predictions.
-- **[`models/feature_importance.csv`](file:///C:/Users/sakth/.gemini/antigravity-ide/scratch/nfpc-mule-detection-main/models/feature_importance.csv):** 123 top features ranked by model gain.
-- **[`reports/NFPC_Phase1_EDA_Report.md`](file:///C:/Users/sakth/.gemini/antigravity-ide/scratch/nfpc-mule-detection-main/reports/NFPC_Phase1_EDA_Report.md):** 47 statistical tables and 25 analytical plots covering transaction patterns.
-- **[`round-2/report.html`](file:///C:/Users/sakth/.gemini/antigravity-ide/scratch/nfpc-mule-detection-main/round-2/report.html):** Comprehensive Phase 2 solution report.
+Open `http://localhost:3000` in your browser.
 
 ---
 
-## 📂 Repository Structure
+## 📡 API Documentation & Endpoints
 
-```text
-nfpc-mule-detection/
-├── models/
-│   ├── predictions.csv             # 15,848 test account predictions
-│   └── feature_importance.csv      # 123 features ranked by importance
-├── reports/
-│   ├── NFPC_Phase1_EDA_Report.md   # Full EDA report
-│   └── plots/                      # 25 analytical charts & visualizations
-├── round-2/                        # Phase 2 Pipeline & Deliverables
-│   ├── pipeline/
-│   │   ├── config.py               # Paths, seeds, constants
-│   │   ├── features.py             # 4-pass feature engineering
-│   │   ├── label_cleaning.py       # Confident learning & noise removal
-│   │   ├── models_v3.py            # LGBM + XGBoost + CatBoost ensemble
-│   │   ├── temporal.py             # Activity window prediction
-│   │   └── run_v3.py               # Orchestrator
-│   ├── report.html                 # Solution report (HTML)
-│   └── report.md                   # Solution report (Markdown)
-├── src/                            # Phase 1 Pipeline
-│   ├── full_pipeline.py            # End-to-end Phase 1 pipeline
-│   ├── eda_phase1.py               # EDA script
-│   └── md_to_html.py               # Report generator
-├── static-site/                    # Static showcase HTML pages
-│   ├── index.html                  # Main showcase dashboard
-│   └── pitch.html                  # Competition pitch deck
-├── web/                            # Next.js 16 web application
-│   ├── app/                        # Next.js App Router pages
-│   └── package.json
-├── LICENSE                         # MIT License
-├── requirements.txt                # Python dependencies
-└── README.md                       # Project documentation
+### 1. System Health Check
+`GET /health`
+```json
+{
+  "status": "ok",
+  "service": "mule-account-detection",
+  "version": "1.0.0"
+}
+```
+
+### 2. Single Account Prediction & Triage
+`POST /api/predict`
+
+**Request:**
+```json
+{
+  "account_id": "ACCT_MULE_001",
+  "transactions": [
+    {
+      "transaction_id": "TXN_100001",
+      "transaction_timestamp": "2025-03-01 02:15:20",
+      "amount": 95000.0,
+      "txn_type": "C",
+      "channel": "UPC",
+      "mcc_code": 6051,
+      "counterparty_id": "CP_81920"
+    },
+    {
+      "transaction_id": "TXN_100002",
+      "transaction_timestamp": "2025-03-01 02:18:45",
+      "amount": 45000.0,
+      "txn_type": "D",
+      "channel": "UPD",
+      "mcc_code": 6051,
+      "counterparty_id": "CP_10492"
+    }
+  ]
+}
+```
+
+**Response:**
+```json
+{
+  "account_id": "ACCT_MULE_001",
+  "mule_probability": 0.8821,
+  "risk_score": 88.2,
+  "risk_level": "CRITICAL",
+  "model_scores": {
+    "lightgbm": 0.6963,
+    "xgboost": 0.9716,
+    "catboost": 0.7673,
+    "ensemble": 0.8821
+  },
+  "top_reasons": [
+    "Significant volume executed during anomalous overnight hours (12 AM - 6 AM)",
+    "Unusually high counterparty dispersion per transaction",
+    "Rapid fund depletion shortly after incoming credits (pass-through)",
+    "Transactions structured just below the ₹50,000 regulatory reporting threshold"
+  ],
+  "mule_archetype": "Structuring",
+  "investigation_summary": "Account ACCT_MULE_001 exhibits elevated mule risk (CRITICAL triage level, 88.2% probability)..."
+}
+```
+
+### 3. Batch CSV Dataset Upload
+`POST /api/predict/batch`
+Accepts multipart form-data CSV file upload. Parses granular transactions, runs the full feature pipeline, executes offline-trained tree models, and returns ranked high-risk accounts.
+
+### 4. Account Directory & Filtering
+`GET /api/accounts?page=1&limit=25&risk_level=CRITICAL&sort_by=risk_score&order=desc`
+
+### 5. Detailed Account Investigation
+`GET /api/accounts/{account_id}`
+Returns complete forensic case file: multi-model score breakdown, SHAP attribution bars, telemetry metrics (velocity, volume, in/out ratio), behavioral archetype, and suspicious activity window.
+
+### 6. Analytics Overview & Charts
+- `GET /api/analytics/overview`
+- `GET /api/analytics/risk-distribution`
+- `GET /api/analytics/archetypes`
+- `GET /api/analytics/full`
+
+---
+
+## 📁 Repository Structure
+
+```
+mule-account-detection/
+├── backend/
+│   ├── main.py                     # FastAPI application & lifecycle bindings
+│   ├── requirements.txt            # Backend dependencies
+│   ├── .env.example                # Environment configuration template
+│   ├── train_and_export_models.py  # Model serialization pipeline
+│   ├── api/
+│   │   ├── predict.py              # POST /predict and POST /predict/batch
+│   │   ├── accounts.py             # GET /accounts and GET /accounts/{id}
+│   │   └── analytics.py            # GET /analytics/overview, risk distribution
+│   ├── core/
+│   │   ├── config.py               # Pydantic Settings & thresholds
+│   │   ├── database.py             # SQLAlchemy abstracted engine
+│   │   └── models.py               # Database schemas (Account, Prediction, RiskFactor)
+│   ├── services/
+│   │   ├── feature_service.py      # Real transaction feature engineering
+│   │   ├── prediction_service.py   # Multi-model inference & SHAP TreeExplainer
+│   │   ├── risk_service.py         # Risk scoring (0-100) & tier classification
+│   │   ├── explanation_service.py  # SHAP attribution & natural language mapping
+│   │   └── archetype_service.py    # Transparent behavioral pattern detection
+│   ├── schemas/                    # Pydantic request/response contracts
+│   ├── models/                     # Native serialized models (.txt, .json, .cbm)
+│   └── tests/                      # Automated test suite
+├── web/                            # Next.js 16 + React 19 Frontend
+│   ├── app/
+│   │   ├── page.tsx                # Interactive multi-tab application
+│   │   ├── accounts/[id]/page.tsx  # Direct URL account investigation
+│   │   ├── pitch/                  # Slide deck showcase
+│   │   └── lightbox.tsx            # Plot gallery viewer
+│   ├── components/
+│   │   ├── Navbar.tsx              # Reactive header with live status
+│   │   ├── Dashboard.tsx           # KPI metrics, SVG charts, triage table
+│   │   ├── AccountsList.tsx        # Searchable, filterable directory
+│   │   ├── AccountInvestigation.tsx # Deep-dive case file with SHAP bars
+│   │   ├── CsvUpload.tsx           # Drag-and-drop batch analyzer
+│   │   └── ResearchSection.tsx     # Scientific competition findings
+│   └── public/plots/               # 25 high-resolution research figures
+├── sample_data/
+│   ├── sample_transactions.csv     # Granular banking sample dataset
+│   └── README.md                   # Schema & archetype documentation
+└── round-2/                        # Competition deliverables & pipeline scripts
 ```
 
 ---
 
-## 📄 License
+## ⚖️ Important Regulatory & Compliance Disclaimer
 
-This project is licensed under the [MIT License](LICENSE).
+> [!IMPORTANT]
+> **Triage Indicator Notice:**
+> The outputs of this system (including Mule Risk Probabilities, Risk Scores, and Behavioral Archetypes) are **probabilistic risk-triage indicators** intended to assist AML compliance officers and fraud analysts in prioritizing accounts for Enhanced Due Diligence (EDD). They do not constitute a definitive legal finding of fraudulent activity or criminal culpability. Production deployment in a live banking environment requires human-in-the-loop review, audit logging, model monitoring for concept drift, and formal regulatory compliance validation.
 
+---
+
+## 📜 License
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

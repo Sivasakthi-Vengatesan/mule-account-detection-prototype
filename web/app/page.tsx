@@ -1,659 +1,431 @@
-import { LightboxGallery } from "./lightbox";
+"use client";
 
-const PHASE2_EXPERIMENTS = [
-  { version: "V1: Baseline (LGB+XGB+CB)", auc: "0.956", outcome: "Solid starting point with target encoding" },
-  { version: "V2: Optuna HPO (100 trials/model)", auc: "0.956", outcome: "Found optimal near-zero regularization" },
-  { version: "V3: Freq encoding + rank avg + multi-seed", auc: "0.968", outcome: "Best. Eliminated leakage, improved stability", best: true },
-  { version: "V5: Feature interactions (26 derived)", auc: "0.963", outcome: "Hurt. Trees discover interactions internally" },
-  { version: "V6: Pseudo-labeling (2-stage)", auc: "0.787", outcome: "Catastrophic. Diluted mule signal from 2.8% to 1.8%" },
-  { version: "V7: Drop all branch features", auc: "0.959", outcome: "Fixed RH7 but destroyed overall AUC" },
-  { version: "V8: Surgical branch_code drop", auc: "0.958", outcome: "Precise RH7 fix, still too much AUC loss" },
-];
+import React, { useState, useEffect, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
+import Link from "next/link";
+import { Dashboard } from "@/components/Dashboard";
+import { AccountsList } from "@/components/AccountsList";
+import { AccountInvestigation } from "@/components/AccountInvestigation";
+import { CsvUpload } from "@/components/CsvUpload";
+import { ResearchSection } from "@/components/ResearchSection";
 
-const FEATURE_CATEGORIES_P2 = [
-  { cat: "Transaction Core", n: "~100", pass: 1 },
-  { cat: "Transaction Extended", n: "~40", pass: 2 },
-  { cat: "Static Account", n: "~35", pass: 3 },
-  { cat: "Graph / Network", n: "~33", pass: 4 },
-];
+function AppContent() {
+  const searchParams = useSearchParams();
+  const initialTab = searchParams.get("tab") || "dashboard";
+  const initialAccount = searchParams.get("account") || null;
 
-const MULE_ARCHETYPES = [
-  {
-    name: "Pass-Through",
-    desc: "High velocity credits followed by rapid debits, minimal balance retention",
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-6 h-6">
-        <path d="M5 12h14M12 5l7 7-7 7" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    ),
-  },
-  {
-    name: "Network Hub",
-    desc: "High fan-in/fan-out with many unique counterparties acting as intermediary",
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-6 h-6">
-        <circle cx="12" cy="12" r="3" /><path d="M12 2v4m0 12v4m10-10h-4M6 12H2m15.07-7.07l-2.83 2.83M9.76 14.24l-2.83 2.83m0-10.14l2.83 2.83m4.48 4.48l2.83 2.83" strokeLinecap="round" />
-      </svg>
-    ),
-  },
-  {
-    name: "Dormant-Burst",
-    desc: "Long inactivity followed by sudden intense transaction bursts",
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-6 h-6">
-        <path d="M13 10V3L4 14h7v7l9-11h-7z" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    ),
-  },
-  {
-    name: "Structuring",
-    desc: "Deliberately fragmenting amounts below monitoring thresholds",
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-6 h-6">
-        <path d="M3 3v18h18M7 16l4-4 4 4 6-6" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    ),
-  },
-];
+  const [activeTab, setActiveTab] = useState<string>(initialTab);
+  const [investigatingAccountId, setInvestigatingAccountId] = useState<string | null>(initialAccount);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [notificationCount, setNotificationCount] = useState(3);
+  const [showNotificationToast, setShowNotificationToast] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [backendStatus, setBackendStatus] = useState<"checking" | "online" | "offline">("checking");
 
-const RED_HERRINGS = [
-  { rh: 1, desc: "Routine investigation false positives", method: "Heuristic noise weight 0.6", score: "0.995" },
-  { rh: 2, desc: "Missing alert_reason", method: "Heuristic noise weight 0.8", score: "0.990" },
-  { rh: 3, desc: "Future mule_flag_date", method: "Dates after Jun 2025 downweighted", score: "0.993" },
-  { rh: 4, desc: "Very old flag dates", method: "Dates before Jul 2020 downweighted", score: "0.978" },
-  { rh: 5, desc: "Boundary date artifacts", method: "Exact boundary dates flagged", score: "0.993" },
-  { rh: 6, desc: "Frozen accounts as mules", method: "Null flagged_by_branch detected", score: "0.999" },
-  { rh: 7, desc: "Flagged by own branch", method: "Branch features carry signal + noise", score: "0.000" },
-];
+  useEffect(() => {
+    async function checkHealth() {
+      try {
+        const res = await fetch("/health", { cache: "no-store" });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.status === "ok") {
+            setBackendStatus("online");
+            return;
+          }
+        }
+        setBackendStatus("offline");
+      } catch {
+        setBackendStatus("offline");
+      }
+    }
 
-const PHASE1_FEATURES = [
-  { name: "mcc_6051_rate", label: "Wire Transfer Rate", pct: 100 },
-  { name: "was_frozen", label: "Account Freeze History", pct: 38.2 },
-  { name: "ch_UPD_rate", label: "UPI Debit Rate", pct: 12.3 },
-  { name: "cp_per_txn", label: "Counterparties/Txn", pct: 11.1 },
-  { name: "days_since_kyc", label: "KYC Recency", pct: 11.0 },
-  { name: "mcc_5933_rate", label: "Pawn Shop Rate", pct: 10.4 },
-  { name: "p25_amount", label: "P25 Amount", pct: 9.0 },
-  { name: "ch_CHQ_rate", label: "Cheque Rate", pct: 7.4 },
-  { name: "rel_years", label: "Relationship Tenure", pct: 5.7 },
-  { name: "ch_ATW_rate", label: "ATM Withdrawal Rate", pct: 4.9 },
-];
+    checkHealth();
+    const interval = setInterval(checkHealth, 15000);
+    return () => clearInterval(interval);
+  }, []);
 
-const HIGHLIGHT_PLOTS = [
-  { file: "18_model_evaluation.png", label: "ROC & PR Curves" },
-  { file: "19_shap_summary.png", label: "SHAP Summary" },
-  { file: "11_structuring.png", label: "Structuring Detection" },
-  { file: "23_network_topology.png", label: "Network Topology" },
-  { file: "15_velocity.png", label: "Transaction Velocity" },
-  { file: "25_cost_sensitive_matrix.png", label: "Cost-Sensitive Matrix" },
-];
+  useEffect(() => {
+    const tabParam = searchParams.get("tab");
+    const accountParam = searchParams.get("account");
 
-function StatCard({ value, label, sub }: { value: string; label: string; sub?: string }) {
+    if (accountParam) {
+      setInvestigatingAccountId(accountParam);
+      setActiveTab("investigate");
+    } else if (tabParam) {
+      setActiveTab(tabParam);
+      setInvestigatingAccountId(null);
+    }
+  }, [searchParams]);
+
+  const handleInvestigate = (accountId: string) => {
+    setInvestigatingAccountId(accountId);
+    setActiveTab("investigate");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const handleBackToDirectory = () => {
+    setInvestigatingAccountId(null);
+    setActiveTab("accounts");
+  };
+
+  const handleSearchSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (searchQuery.trim()) {
+      handleInvestigate(searchQuery.trim());
+      setSearchQuery("");
+    }
+  };
+
+  const getPageTitle = () => {
+    switch (activeTab) {
+      case "accounts":
+        return { title: "Accounts Directory", subtitle: "160,000 evaluated banking accounts" };
+      case "investigate":
+        return { title: `Investigation: ${investigatingAccountId || "Account"}`, subtitle: "Deep-dive SHAP attribution & behavioral forensics" };
+      case "upload":
+        return { title: "Batch Inference", subtitle: "Upload CSV transactions for real-time model scoring" };
+      case "research":
+        return { title: "Research & Benchmarks", subtitle: "RBIH x IIT Delhi competition models & AUC-ROC metrics" };
+      default:
+        return { title: "Dashboard", subtitle: "Last 30 days &bull; updated 4 min ago" };
+    }
+  };
+
+  const pageInfo = getPageTitle();
+
   return (
-    <div className="group relative rounded-2xl border border-border bg-surface-raised p-6 transition-all hover:border-accent/30 hover:shadow-[0_0_30px_rgba(0,212,170,0.08)]">
-      <div className="text-4xl font-black tracking-tight text-accent sm:text-5xl">{value}</div>
-      <div className="mt-2 text-sm font-medium">{label}</div>
-      {sub && <div className="mt-1 text-xs text-[#666]">{sub}</div>}
-    </div>
-  );
-}
+    <div className="min-h-screen bg-[#c5d0be] text-[#26301f] font-sans antialiased p-3 sm:p-6 lg:p-8">
+      <div className="mx-auto max-w-[1440px] flex flex-col md:flex-row gap-6 items-start">
+        
+        {/* =========================================================================
+            LEFT SIDEBAR (~260px, rounded 28px, raised clay surface #e2e8dc)
+        ========================================================================== */}
+        <aside className="w-full md:w-[260px] shrink-0 clay-card p-5 flex flex-col justify-between self-stretch">
+          <div>
+            {/* Logo Tile + Wordmark */}
+            <div className="flex items-center gap-3.5 mb-8">
+              <div className="w-11 h-11 rounded-2xl bg-[#14776b] flex items-center justify-center shadow-[4px_5px_12px_rgba(16,80,72,0.4),-3px_-3px_8px_rgba(255,255,255,0.35)] shrink-0">
+                <svg className="w-6 h-6 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                </svg>
+              </div>
+              <div>
+                <span className="font-display font-bold text-2xl tracking-tight text-[#26301f] leading-none block">
+                  MuleGuard
+                </span>
+                <span className="text-[11px] font-semibold text-[#6b7663] tracking-wide uppercase font-body">
+                  NFPC &bull; AML OS
+                </span>
+              </div>
 
-function FeatureBar({ name, label, pct, rank }: { name: string; label: string; pct: number; rank: number }) {
-  return (
-    <div className="group flex items-center gap-4">
-      <span className="w-6 shrink-0 text-right text-xs font-mono text-[#666]">{rank}</span>
-      <div className="flex-1">
-        <div className="mb-1 flex items-baseline justify-between">
-          <span className="text-sm font-medium group-hover:text-accent transition-colors">{label}</span>
-          <code className="hidden text-xs font-mono text-[#666] sm:inline">{name}</code>
-        </div>
-        <div className="h-2 w-full overflow-hidden rounded-full bg-surface-overlay">
-          <div className="h-full rounded-full bg-gradient-to-r from-accent/60 to-accent transition-all" style={{ width: `${pct}%` }} />
-        </div>
+              {/* Mobile menu toggle */}
+              <button
+                onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+                className="md:hidden ml-auto p-2 rounded-xl clay-btn text-[#26301f]"
+                aria-label="Toggle navigation"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16m-7 6h7" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Nav Menu Items */}
+            <div className={`space-y-6 ${mobileMenuOpen ? "block" : "hidden md:block"}`}>
+              {/* OVERVIEW NAV GROUP */}
+              <div>
+                <h3 className="text-[10.5px] font-bold uppercase tracking-wider text-[#6b7663] px-3 mb-2 font-body">
+                  OVERVIEW
+                </h3>
+                <nav className="space-y-1.5">
+                  {[
+                    {
+                      id: "dashboard",
+                      name: "Dashboard",
+                      icon: (
+                        <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.2">
+                          <rect x="3" y="3" width="7" height="7" rx="2" />
+                          <rect x="14" y="3" width="7" height="7" rx="2" />
+                          <rect x="14" y="14" width="7" height="7" rx="2" />
+                          <rect x="3" y="14" width="7" height="7" rx="2" />
+                        </svg>
+                      ),
+                    },
+                    {
+                      id: "accounts",
+                      name: "Accounts",
+                      icon: (
+                        <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.2">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                        </svg>
+                      ),
+                    },
+                    {
+                      id: "upload",
+                      name: "Batch Upload",
+                      icon: (
+                        <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.2">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                        </svg>
+                      ),
+                    },
+                    {
+                      id: "research",
+                      name: "Research",
+                      icon: (
+                        <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.2">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                      ),
+                    },
+                  ].map((item) => {
+                    const isActive = activeTab === item.id || (item.id === "accounts" && activeTab === "investigate");
+                    return (
+                      <button
+                        key={item.id}
+                        onClick={() => {
+                          setActiveTab(item.id);
+                          setInvestigatingAccountId(null);
+                        }}
+                        className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-full text-sm font-medium transition-all ${
+                          isActive
+                            ? "bg-[#14776b] text-white shadow-[inset_3px_4px_8px_rgba(10,48,43,0.55),inset_-2px_-2px_6px_rgba(255,255,255,0.25)] font-semibold"
+                            : "text-[#26301f] hover:text-[#14776b] hover:bg-[#dbe2d5]/60 active:scale-[0.98]"
+                        }`}
+                      >
+                        <span className={isActive ? "text-white" : "text-[#6b7663]"}>
+                          {item.icon}
+                        </span>
+                        <span>{item.name}</span>
+                      </button>
+                    );
+                  })}
+                </nav>
+              </div>
+
+              {/* WORKSPACE NAV GROUP */}
+              <div>
+                <h3 className="text-[10.5px] font-bold uppercase tracking-wider text-[#6b7663] px-3 mb-2 font-body">
+                  WORKSPACE
+                </h3>
+                <nav className="space-y-1.5">
+                  {[
+                    {
+                      name: "SHAP Explainer",
+                      icon: (
+                        <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.2">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                        </svg>
+                      ),
+                      action: () => handleInvestigate("ACCT_MULE_001"),
+                    },
+                    {
+                      name: "AML Rule Engine",
+                      icon: (
+                        <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.2">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                        </svg>
+                      ),
+                      action: () => setActiveTab("research"),
+                    },
+                    {
+                      name: "Triage Queue",
+                      icon: (
+                        <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.2">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                        </svg>
+                      ),
+                      action: () => setActiveTab("accounts"),
+                    },
+                  ].map((item) => (
+                    <button
+                      key={item.name}
+                      onClick={item.action}
+                      className="w-full flex items-center gap-3 px-3.5 py-2 rounded-full text-sm font-medium text-[#26301f] hover:text-[#14776b] hover:bg-[#dbe2d5]/60 transition-all"
+                    >
+                      <span className="text-[#6b7663]">{item.icon}</span>
+                      <span>{item.name}</span>
+                    </button>
+                  ))}
+                </nav>
+              </div>
+
+              {/* MODEL CONFIDENCE SUNKEN METER */}
+              <div className="pt-2">
+                <div className="clay-sunken p-3.5 rounded-2xl">
+                  <div className="flex items-center justify-between text-xs font-semibold mb-2">
+                    <span className="text-[#26301f]">Ensemble AUC</span>
+                    <span className="text-[#14776b] font-display font-bold text-sm">0.968</span>
+                  </div>
+                  <div className="w-full h-2.5 bg-[#c5d0be] rounded-full overflow-hidden shadow-[inset_2px_2px_4px_rgba(104,118,100,0.45)]">
+                    <div
+                      className="h-full bg-[#14776b] rounded-full transition-all duration-500 shadow-[0_1px_3px_rgba(16,80,72,0.4)]"
+                      style={{ width: "96.8%" }}
+                    />
+                  </div>
+                  <div className="text-[10px] text-[#6b7663] mt-1.5 flex justify-between">
+                    <span>Rank Avg V3</span>
+                    <span className="text-emerald-700 font-bold">Optimal</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* INVESTIGATOR PROFILE CHIP */}
+          <div className="mt-8 pt-4 border-t border-[#c5d0be]/40">
+            <div className="clay-tile p-2.5 rounded-2xl flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-[#14776b] text-white font-display font-bold text-base flex items-center justify-center shadow-[3px_4px_8px_rgba(16,80,72,0.4),-2px_-2px_5px_rgba(255,255,255,0.3)] shrink-0">
+                SV
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="text-xs font-bold text-[#26301f] truncate font-display">
+                  Sakthi V.
+                </div>
+                <div className="text-[10.5px] text-[#6b7663] truncate">
+                  Lead AML Analyst
+                </div>
+              </div>
+              <div
+                className={`w-2.5 h-2.5 rounded-full shrink-0 ${
+                  backendStatus === "online" ? "bg-emerald-600" : "bg-rose-500"
+                }`}
+                title={backendStatus === "online" ? "ML Backend Connected" : "Backend Offline"}
+              />
+            </div>
+          </div>
+        </aside>
+
+        {/* =========================================================================
+            MAIN COLUMN (Topbar, Dynamic Content)
+        ========================================================================== */}
+        <main className="flex-1 w-full space-y-6">
+          
+          {/* TOPBAR */}
+          <header className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div>
+              <h1 className="font-display font-bold text-3xl sm:text-4xl text-[#26301f] tracking-tight">
+                {pageInfo.title}
+              </h1>
+              <p
+                className="text-xs sm:text-sm text-[#6b7663] font-medium mt-0.5"
+                dangerouslySetInnerHTML={{ __html: pageInfo.subtitle }}
+              />
+            </div>
+
+            <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
+              {/* Sunken Search Field */}
+              <form onSubmit={handleSearchSubmit} className="relative hidden sm:block w-64 lg:w-72">
+                <input
+                  type="text"
+                  placeholder="Search Account ID (e.g. ACCT_MULE_001)..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full clay-sunken-pill pl-9 pr-4 py-2.5 text-xs text-[#26301f] placeholder-[#6b7663] focus:outline-none focus:ring-1 focus:ring-[#14776b]/50"
+                />
+                <button type="submit" className="absolute left-3 top-3 text-[#6b7663]">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  </svg>
+                </button>
+              </form>
+
+              {/* Notification Bell */}
+              <button
+                onClick={() => {
+                  setShowNotificationToast(true);
+                  setTimeout(() => setShowNotificationToast(false), 4000);
+                }}
+                className="w-10 h-10 rounded-full clay-btn flex items-center justify-center relative text-[#26301f] shrink-0"
+                aria-label="Alerts"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                </svg>
+                {notificationCount > 0 && (
+                  <span className="w-2.5 h-2.5 rounded-full bg-[#c4643f] absolute top-2 right-2 border-2 border-[#e2e8dc] shadow-sm" />
+                )}
+              </button>
+
+              {/* Batch Upload / Action Button */}
+              <button
+                onClick={() => {
+                  setActiveTab("upload");
+                  setInvestigatingAccountId(null);
+                }}
+                className="clay-teal-btn px-4 py-2.5 rounded-full text-xs sm:text-sm font-semibold flex items-center gap-2 shrink-0"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                </svg>
+                <span>Batch CSV Upload</span>
+              </button>
+            </div>
+          </header>
+
+          {/* Toast */}
+          {showNotificationToast && (
+            <div className="clay-tile p-3 px-4 rounded-xl flex items-center justify-between bg-[#e2e8dc] text-xs text-[#26301f]">
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-[#c4643f]" />
+                <span className="font-semibold">Live Alert:</span>
+                <span className="text-[#6b7663]">Account ACCT_MULE_001 triggered Structuring + High Velocity rules.</span>
+              </div>
+              <button
+                onClick={() => setShowNotificationToast(false)}
+                className="text-[#6b7663] hover:text-[#26301f] text-xs font-bold"
+              >
+                &times;
+              </button>
+            </div>
+          )}
+
+          {/* DYNAMIC VIEW ROUTING */}
+          {activeTab === "investigate" && investigatingAccountId ? (
+            <AccountInvestigation
+              accountId={investigatingAccountId}
+              onBack={handleBackToDirectory}
+            />
+          ) : activeTab === "accounts" ? (
+            <AccountsList onInvestigate={handleInvestigate} />
+          ) : activeTab === "upload" ? (
+            <CsvUpload
+              onInvestigate={handleInvestigate}
+              onNavigateToAccounts={() => {
+                setActiveTab("accounts");
+                setInvestigatingAccountId(null);
+              }}
+            />
+          ) : activeTab === "research" ? (
+            <ResearchSection />
+          ) : (
+            <Dashboard
+              onInvestigate={handleInvestigate}
+              onNavigateToUpload={() => {
+                setActiveTab("upload");
+                setInvestigatingAccountId(null);
+              }}
+              onNavigateToAccounts={() => {
+                setActiveTab("accounts");
+                setInvestigatingAccountId(null);
+              }}
+            />
+          )}
+        </main>
       </div>
     </div>
   );
 }
 
-function PhaseTag({ phase, active }: { phase: string; active?: boolean }) {
-  return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ${active ? "bg-accent/15 text-accent border border-accent/30" : "bg-surface-overlay text-[#888] border border-border"}`}>
-      {active && <span className="h-1.5 w-1.5 rounded-full bg-accent animate-pulse" />}
-      {phase}
-    </span>
-  );
-}
-
 export default function Home() {
   return (
-    <div className="min-h-screen">
-      {/* Nav */}
-      <nav className="fixed top-0 z-50 w-full border-b border-border/50 bg-surface/80 backdrop-blur-xl">
-        <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-4 sm:px-6">
-          <div className="flex items-center gap-3">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent/10">
-              <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4 text-accent" stroke="currentColor" strokeWidth="2">
-                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-              </svg>
-            </div>
-            <span className="text-sm font-semibold tracking-tight">NFPC</span>
-            <span className="hidden text-xs text-[#666] sm:inline">Mule Detection</span>
-          </div>
-          <div className="flex items-center gap-3 text-xs text-[#a0a0a0] sm:gap-6">
-            <a href="#phase2" className="hidden transition-colors hover:text-accent sm:inline">Phase 2</a>
-            <a href="#phase1" className="hidden transition-colors hover:text-accent sm:inline">Phase 1</a>
-            <a href="#patterns" className="hidden transition-colors hover:text-accent md:inline">Patterns</a>
-            <a href="#visualizations" className="hidden transition-colors hover:text-accent md:inline">Viz</a>
-            <a href="/pitch" className="rounded-full border border-accent/30 px-3 py-1 text-accent transition-colors hover:bg-accent/10">Pitch</a>
-          </div>
-        </div>
-      </nav>
-
-      {/* Hero */}
-      <section className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden px-4 pt-14 sm:px-6">
-        <div className="pointer-events-none absolute inset-0 opacity-[0.03]" style={{ backgroundImage: "linear-gradient(rgba(255,255,255,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.1) 1px, transparent 1px)", backgroundSize: "60px 60px" }} />
-        <div className="pointer-events-none absolute left-1/2 top-1/3 h-[800px] w-[800px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-accent/5 blur-[120px]" />
-
-        <div className="relative z-10 max-w-4xl text-center">
-          <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-border bg-surface-raised px-4 py-1.5 text-xs text-[#a0a0a0]">
-            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />
-            RBIH x IIT Delhi TRYST 2025
-          </div>
-
-          <h1 className="text-4xl font-black tracking-tight sm:text-5xl md:text-7xl lg:text-8xl">
-            Catching{" "}
-            <span className="bg-gradient-to-r from-accent to-emerald-400 bg-clip-text text-transparent">
-              Money Mules
-            </span>
-          </h1>
-
-          <p className="mx-auto mt-6 max-w-2xl text-lg text-[#a0a0a0] sm:text-xl">
-            Machine learning system detecting fraudulent intermediary accounts across
-            160K accounts and 400M+ transactions. 208 engineered features.
-            3-model ensemble. Two competition phases.
-          </p>
-
-          <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
-            <PhaseTag phase="Phase 1: EDA + Modeling" />
-            <PhaseTag phase="Phase 2: Production Pipeline" active />
-          </div>
-
-          <div className="mt-10 flex flex-wrap items-center justify-center gap-4">
-            <a href="#phase2" className="inline-flex h-12 items-center gap-2 rounded-full bg-accent px-8 text-sm font-semibold text-surface transition-all hover:scale-[1.02] hover:shadow-[0_0_30px_rgba(0,212,170,0.3)] active:scale-[0.98]">
-              Phase 2 Results
-              <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M1 8h14M8 1l7 7-7 7" />
-              </svg>
-            </a>
-            <a href="https://github.com/divyamohan1993/nfpc-mule-detection" target="_blank" rel="noopener noreferrer" className="inline-flex h-12 items-center gap-2 rounded-full border border-border px-8 text-sm font-medium text-[#a0a0a0] transition-all hover:border-[#444] hover:text-[#f0f0f0]">
-              <svg viewBox="0 0 16 16" fill="currentColor" className="h-4 w-4">
-                <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />
-              </svg>
-              GitHub
-            </a>
-          </div>
-        </div>
-
-        <div className="absolute bottom-8 left-1/2 flex -translate-x-1/2 flex-col items-center gap-2 text-[#444]">
-          <span className="text-[10px] uppercase tracking-[0.2em]">Scroll</span>
-          <div className="h-8 w-[1px] bg-gradient-to-b from-[#444] to-transparent" />
-        </div>
-      </section>
-
-      {/* ═══════════════════════════════════════════════════════════════════
-          PHASE 2
-          ═══════════════════════════════════════════════════════════════════ */}
-      <section id="phase2" className="relative px-4 py-16 sm:px-6 sm:py-32">
-        <div className="mx-auto max-w-7xl">
-          <div className="mb-4 flex items-center gap-3">
-            <span className="text-xs font-mono uppercase tracking-[0.2em] text-accent">Phase 2</span>
-            <PhaseTag phase="Production Pipeline" active />
-          </div>
-          <h2 className="text-3xl font-black tracking-tight sm:text-4xl md:text-5xl">
-            Competition Results
-          </h2>
-          <p className="mt-4 max-w-xl text-[#a0a0a0]">
-            3-model gradient-boosted tree ensemble (LightGBM + XGBoost + CatBoost) with rank averaging,
-            trained on 208 features across 160K accounts and ~400M transactions (16 GB).
-          </p>
-
-          <div className="mt-12 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
-            <StatCard value="0.968" label="Public AUC-ROC" sub="Leaderboard rank #37" />
-            <StatCard value="0.956" label="Private AUC-ROC" sub="Hidden test set" />
-            <StatCard value="208" label="Engineered Features" sub="4 computation passes" />
-            <StatCard value="160K" label="Accounts Analyzed" sub="~400M transactions" />
-          </div>
-
-          {/* Model Architecture */}
-          <div className="mt-16">
-            <h3 className="mb-6 text-xl font-bold">3-Model Ensemble</h3>
-            <div className="overflow-x-auto rounded-xl border border-border">
-              <table className="w-full text-xs sm:text-sm">
-                <thead>
-                  <tr className="border-b border-border bg-surface-raised">
-                    <th className="px-3 py-3 text-left font-medium text-[#a0a0a0] sm:px-6 sm:py-4">Model</th>
-                    <th className="px-3 py-3 text-right font-medium text-[#a0a0a0] sm:px-6 sm:py-4">Training</th>
-                    <th className="px-3 py-3 text-right font-medium text-[#a0a0a0] sm:px-6 sm:py-4">Ensemble Method</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {[
-                    { model: "LightGBM", training: "3-seed x 5-fold CV", method: "Rank Averaging" },
-                    { model: "XGBoost", training: "3-seed x 5-fold CV", method: "Rank Averaging" },
-                    { model: "CatBoost", training: "3-seed x 5-fold CV", method: "Rank Averaging" },
-                  ].map((m, i) => (
-                    <tr key={m.model} className={`${i < 2 ? "border-b border-border/50" : ""} transition-colors hover:bg-surface-overlay/50`}>
-                      <td className="px-3 py-3 font-medium sm:px-6 sm:py-4">{m.model}</td>
-                      <td className="px-3 py-3 text-right font-mono text-[#a0a0a0] sm:px-6 sm:py-4">{m.training}</td>
-                      <td className="px-3 py-3 text-right font-mono text-[#a0a0a0] sm:px-6 sm:py-4">{m.method}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {/* Feature Engineering */}
-          <div className="mt-16">
-            <h3 className="mb-6 text-xl font-bold">Feature Engineering (208 Features)</h3>
-            <p className="mb-6 text-sm text-[#a0a0a0]">
-              Computed in 4 passes over the 16 GB dataset using memory-efficient batch processing.
-            </p>
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              {FEATURE_CATEGORIES_P2.map((c) => (
-                <div key={c.cat} className="rounded-xl border border-border bg-surface-raised p-5 transition-colors hover:border-accent/20">
-                  <div className="flex items-baseline justify-between">
-                    <span className="text-2xl font-black text-accent">{c.n}</span>
-                    <span className="rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-bold text-accent">Pass {c.pass}</span>
-                  </div>
-                  <div className="mt-2 text-sm text-[#a0a0a0]">{c.cat}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Experiments */}
-          <div className="mt-16">
-            <h3 className="mb-6 text-xl font-bold">Experiment Log</h3>
-            <div className="overflow-x-auto rounded-xl border border-border">
-              <table className="w-full text-xs sm:text-sm">
-                <thead>
-                  <tr className="border-b border-border bg-surface-raised">
-                    <th className="px-3 py-3 text-left font-medium text-[#a0a0a0] sm:px-6 sm:py-4">Experiment</th>
-                    <th className="px-3 py-3 text-right font-medium text-[#a0a0a0] sm:px-6 sm:py-4">Public AUC</th>
-                    <th className="px-3 py-3 text-left font-medium text-[#a0a0a0] sm:px-6 sm:py-4">Outcome</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {PHASE2_EXPERIMENTS.map((e, i) => (
-                    <tr key={e.version} className={`${i < PHASE2_EXPERIMENTS.length - 1 ? "border-b border-border/50" : ""} transition-colors hover:bg-surface-overlay/50 ${e.best ? "bg-accent/5" : ""}`}>
-                      <td className={`px-3 py-3 sm:px-6 sm:py-4 ${e.best ? "font-bold text-accent" : "font-medium"}`}>{e.version}</td>
-                      <td className={`px-3 py-3 text-right font-mono sm:px-6 sm:py-4 ${e.best ? "font-bold text-accent" : ""}`}>{e.auc}</td>
-                      <td className="px-3 py-3 text-[#a0a0a0] sm:px-6 sm:py-4">{e.outcome}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="mt-4 rounded-xl border border-warning/30 bg-warning/5 p-4">
-              <p className="text-sm text-[#ccc]">
-                <span className="font-bold text-warning">Key Lesson:</span>{" "}
-                With near-zero regularization and powerful tree models, the simplest feature set produces the best generalization. Feature engineering quality matters more than model complexity.
-              </p>
-            </div>
-          </div>
-
-          {/* Mule Archetypes */}
-          <div className="mt-16">
-            <h3 className="mb-6 text-xl font-bold">Mule Behavioral Archetypes</h3>
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              {MULE_ARCHETYPES.map((a) => (
-                <div key={a.name} className="group rounded-xl border border-border bg-surface-raised p-6 transition-all hover:border-accent/30 hover:shadow-[0_0_20px_rgba(0,212,170,0.05)]">
-                  <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-accent/10 text-accent transition-colors group-hover:bg-accent/20">
-                    {a.icon}
-                  </div>
-                  <h4 className="font-bold">{a.name}</h4>
-                  <p className="mt-1 text-sm leading-relaxed text-[#a0a0a0]">{a.desc}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Red Herring Analysis */}
-          <div className="mt-16">
-            <h3 className="mb-6 text-xl font-bold">Red Herring Analysis</h3>
-            <div className="overflow-x-auto rounded-xl border border-border">
-              <table className="w-full text-xs sm:text-sm">
-                <thead>
-                  <tr className="border-b border-border bg-surface-raised">
-                    <th className="px-3 py-3 text-center font-medium text-[#a0a0a0] sm:px-4 sm:py-4">RH</th>
-                    <th className="px-3 py-3 text-left font-medium text-[#a0a0a0] sm:px-4 sm:py-4">Description</th>
-                    <th className="hidden px-3 py-3 text-left font-medium text-[#a0a0a0] sm:table-cell sm:px-4 sm:py-4">Detection Method</th>
-                    <th className="px-3 py-3 text-right font-medium text-[#a0a0a0] sm:px-4 sm:py-4">Score</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {RED_HERRINGS.map((r, i) => (
-                    <tr key={r.rh} className={`${i < RED_HERRINGS.length - 1 ? "border-b border-border/50" : ""} transition-colors hover:bg-surface-overlay/50`}>
-                      <td className="px-3 py-3 text-center font-mono text-[#666] sm:px-4 sm:py-4">#{r.rh}</td>
-                      <td className="px-3 py-3 font-medium sm:px-4 sm:py-4">{r.desc}</td>
-                      <td className="hidden px-3 py-3 text-[#a0a0a0] sm:table-cell sm:px-4 sm:py-4">{r.method}</td>
-                      <td className="px-3 py-3 text-right sm:px-4 sm:py-4">
-                        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold sm:text-xs ${parseFloat(r.score) >= 0.9 ? "bg-accent/10 text-accent" : "bg-danger/10 text-danger"}`}>
-                          {r.score}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="mt-4 rounded-xl border border-border bg-surface-raised p-4">
-              <p className="text-sm text-[#a0a0a0]">
-                <span className="font-bold text-[#f0f0f0]">RH7 Analysis:</span>{" "}
-                Branch features carry genuine discriminative signal. Removing all branch features achieves RH7=1.000 but drops AUC from 0.968 to 0.959. The surgical V8 approach (drop only branch_code encodings) balances the tradeoff.
-              </p>
-            </div>
-          </div>
-
-          {/* Label Cleaning */}
-          <div className="mt-16">
-            <h3 className="mb-6 text-xl font-bold">Label Cleaning Strategy</h3>
-            <div className="grid gap-6 lg:grid-cols-3">
-              {[
-                { title: "Confident Learning", desc: "2 rounds of out-of-fold LightGBM probability estimation with per-class thresholds (Northcutt et al. 2021). Identifies label noise." },
-                { title: "Heuristic Noise Scoring", desc: "Rule-based detection targeting 7 red herring categories. Assigns noise scores based on metadata signals." },
-                { title: "Combined Weights", desc: "max(CL score, heuristic score) mapped to sample weights in [0.2, 1.0]. Downweights noisy labels without discarding data." },
-              ].map((s) => (
-                <div key={s.title} className="rounded-xl border border-border bg-surface-raised p-6">
-                  <h4 className="mb-2 text-sm font-bold text-accent">{s.title}</h4>
-                  <p className="text-sm leading-relaxed text-[#a0a0a0]">{s.desc}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Infrastructure */}
-          <div className="mt-16 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {[
-              { val: "GCP n2-highmem-8", label: "Compute", sub: "8 vCPU, 64GB RAM" },
-              { val: "~12 min", label: "Training Time", sub: "3-seed x 5-fold CV" },
-              { val: "~10 min", label: "Feature Engineering", sub: "208 features, 160K accounts" },
-              { val: "16 GB", label: "Dataset Size", sub: "~400M transactions" },
-            ].map((s) => (
-              <div key={s.label} className="rounded-xl border border-border bg-surface-raised p-5 text-center">
-                <div className="text-lg font-black text-accent">{s.val}</div>
-                <div className="mt-1 text-sm font-medium">{s.label}</div>
-                <div className="mt-0.5 text-xs text-[#666]">{s.sub}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* ═══════════════════════════════════════════════════════════════════
-          PHASE 1 — EDA & Initial Modeling
-          ═══════════════════════════════════════════════════════════════════ */}
-      <section id="phase1" className="border-t border-border/50 px-4 py-16 sm:px-6 sm:py-24">
-        <div className="mx-auto max-w-7xl">
-          <div className="mb-4 flex items-center gap-3">
-            <span className="text-xs font-mono uppercase tracking-[0.2em] text-accent">Phase 1</span>
-            <PhaseTag phase="EDA + Initial Modeling" />
-          </div>
-          <h2 className="text-3xl font-black tracking-tight sm:text-4xl md:text-5xl">
-            Exploration &amp; Discovery
-          </h2>
-          <p className="mt-4 max-w-xl text-[#a0a0a0]">
-            Deep EDA on 24K accounts with 7.4M transactions. LightGBM + XGBoost
-            ensemble with 125 features achieving 0.985 OOF AUC-ROC.
-          </p>
-
-          <div className="mt-12 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
-            <StatCard value="0.985" label="OOF AUC-ROC" sub="LightGBM + XGBoost ensemble" />
-            <StatCard value="125" label="Engineered Features" sub="13 categories" />
-            <StatCard value="12/12" label="Mule Patterns Found" sub="All validated statistically" />
-            <StatCard value="1:90" label="Class Imbalance" sub="263 mules / 23,760 legitimate" />
-          </div>
-
-          {/* Model Comparison */}
-          <div className="mt-16">
-            <h3 className="mb-6 text-xl font-bold">Model Comparison</h3>
-            <div className="overflow-x-auto rounded-xl border border-border">
-              <table className="w-full text-xs sm:text-sm">
-                <thead>
-                  <tr className="border-b border-border bg-surface-raised">
-                    <th className="px-3 py-3 text-left font-medium text-[#a0a0a0] sm:px-6 sm:py-4">Model</th>
-                    <th className="px-3 py-3 text-right font-medium text-[#a0a0a0] sm:px-6 sm:py-4">OOF AUC-ROC</th>
-                    <th className="px-3 py-3 text-right font-medium text-[#a0a0a0] sm:px-6 sm:py-4">Mean Fold AUC</th>
-                    <th className="px-3 py-3 text-right font-medium text-[#a0a0a0] sm:px-6 sm:py-4">Std Dev</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr className="border-b border-border/50 transition-colors hover:bg-surface-overlay/50">
-                    <td className="px-3 py-3 font-medium sm:px-6 sm:py-4">LightGBM</td>
-                    <td className="px-3 py-3 text-right font-mono sm:px-6 sm:py-4">0.9834</td>
-                    <td className="px-3 py-3 text-right font-mono sm:px-6 sm:py-4">0.9831</td>
-                    <td className="px-3 py-3 text-right font-mono text-[#666] sm:px-6 sm:py-4">&plusmn;0.0058</td>
-                  </tr>
-                  <tr className="border-b border-border/50 transition-colors hover:bg-surface-overlay/50">
-                    <td className="px-3 py-3 font-medium sm:px-6 sm:py-4">XGBoost</td>
-                    <td className="px-3 py-3 text-right font-mono sm:px-6 sm:py-4">0.9789</td>
-                    <td className="px-3 py-3 text-right font-mono sm:px-6 sm:py-4">0.9785</td>
-                    <td className="px-3 py-3 text-right font-mono text-[#666] sm:px-6 sm:py-4">&plusmn;0.0067</td>
-                  </tr>
-                  <tr className="transition-colors hover:bg-surface-overlay/50">
-                    <td className="px-3 py-3 font-bold text-accent sm:px-6 sm:py-4">Ensemble</td>
-                    <td className="px-3 py-3 text-right font-mono font-bold text-accent sm:px-6 sm:py-4">0.9851</td>
-                    <td className="px-3 py-3 text-right font-mono text-[#666] sm:px-6 sm:py-4">-</td>
-                    <td className="px-3 py-3 text-right font-mono text-[#666] sm:px-6 sm:py-4">-</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {/* Key Signals */}
-          <div className="mt-16">
-            <h3 className="mb-6 text-xl font-bold">Red Flags: Mule vs Legitimate</h3>
-            <div className="overflow-x-auto rounded-xl border border-border">
-              <table className="w-full text-xs sm:text-sm">
-                <thead>
-                  <tr className="border-b border-border bg-surface-raised">
-                    <th className="px-3 py-3 text-left font-medium text-[#a0a0a0] sm:px-6 sm:py-4">Signal</th>
-                    <th className="px-3 py-3 text-right font-medium text-[#a0a0a0] sm:px-6 sm:py-4">Legitimate</th>
-                    <th className="px-3 py-3 text-right font-medium text-[#a0a0a0] sm:px-6 sm:py-4">Mule</th>
-                    <th className="px-3 py-3 text-right font-medium text-[#a0a0a0] sm:px-6 sm:py-4">Multiplier</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {[
-                    { signal: "Accounts Frozen", legit: "3.0%", mule: "58.9%", mult: "19.6x" },
-                    { signal: "MCC 6051 (Wire Transfer)", legit: "0.12%", mule: "2.10%", mult: "18x" },
-                    { signal: "Post-Mobile Txn Value", legit: "127K", mule: "903K", mult: "7.1x" },
-                    { signal: "Txn-to-Balance Ratio", legit: "68.5", mule: "473.9", mult: "6.9x" },
-                    { signal: "Near-50K Structuring", legit: "1.1%", mule: "5.9%", mult: "5.3x" },
-                    { signal: "Median Txn Velocity", legit: "336.8h", mule: "78.3h", mult: "4.3x faster" },
-                    { signal: "Unique Counterparties", legit: "13.7", mule: "37.1", mult: "2.7x" },
-                    { signal: "Pass-Through Ratio", legit: "1.184", mule: "1.015", mult: "~1:1" },
-                  ].map((s) => (
-                    <tr key={s.signal} className="border-b border-border/50 transition-colors hover:bg-surface-overlay/50">
-                      <td className="px-3 py-3 font-medium sm:px-6 sm:py-4">{s.signal}</td>
-                      <td className="px-3 py-3 text-right font-mono text-[#a0a0a0] sm:px-6 sm:py-4">{s.legit}</td>
-                      <td className="px-3 py-3 text-right font-mono text-[#ff4444] sm:px-6 sm:py-4">{s.mule}</td>
-                      <td className="px-3 py-3 text-right sm:px-6 sm:py-4">
-                        <span className="inline-flex items-center rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-bold text-accent sm:px-2.5 sm:text-xs">{s.mult}</span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {/* Top Features */}
-          <div className="mt-16">
-            <h3 className="mb-6 text-xl font-bold">Top 10 Features (Phase 1 SHAP)</h3>
-            <div className="grid gap-6 lg:grid-cols-2">
-              <div className="space-y-4">
-                {PHASE1_FEATURES.slice(0, 5).map((f, i) => (
-                  <FeatureBar key={f.name} name={f.name} label={f.label} pct={f.pct} rank={i + 1} />
-                ))}
-              </div>
-              <div className="space-y-4">
-                {PHASE1_FEATURES.slice(5, 10).map((f, i) => (
-                  <FeatureBar key={f.name} name={f.name} label={f.label} pct={f.pct} rank={i + 6} />
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Patterns (shared across both phases) */}
-      <section id="patterns" className="border-t border-border/50 px-4 py-16 sm:px-6 sm:py-24">
-        <div className="mx-auto max-w-7xl">
-          <div className="mb-4 text-xs font-mono uppercase tracking-[0.2em] text-accent">
-            Behavioral Analysis
-          </div>
-          <h2 className="text-3xl font-black tracking-tight sm:text-4xl md:text-5xl">
-            12 Mule Patterns
-          </h2>
-          <p className="mt-4 max-w-xl text-[#a0a0a0]">
-            All 12 known mule behavior patterns from the RBIH challenge
-            specification were identified and validated with statistical evidence.
-          </p>
-
-          <div className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {[
-              { id: 1, name: "Dormant Activation", desc: "Inactive accounts suddenly process high-value bursts", icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-6 h-6"><path d="M13 10V3L4 14h7v7l9-11h-7z" strokeLinecap="round" strokeLinejoin="round" /></svg> },
-              { id: 2, name: "Structuring", desc: "Transactions just below the 50K INR reporting threshold", icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-6 h-6"><path d="M3 3v18h18M7 16l4-4 4 4 6-6" strokeLinecap="round" strokeLinejoin="round" /></svg> },
-              { id: 3, name: "Rapid Pass-Through", desc: "Near 1:1 credit-to-debit ratio, money flows through untouched", icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-6 h-6"><path d="M5 12h14M12 5l7 7-7 7" strokeLinecap="round" strokeLinejoin="round" /></svg> },
-              { id: 4, name: "Fan-In / Fan-Out", desc: "Many-to-one or one-to-many fund flows reveal network topology", icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-6 h-6"><circle cx="12" cy="12" r="3" /><path d="M12 2v4m0 12v4m10-10h-4M6 12H2m15.07-7.07l-2.83 2.83M9.76 14.24l-2.83 2.83m0-10.14l2.83 2.83m4.48 4.48l2.83 2.83" strokeLinecap="round" /></svg> },
-              { id: 5, name: "Geographic Anomaly", desc: "PIN code mismatches across customer, branch, and address", icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-6 h-6"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" /><circle cx="12" cy="9" r="2.5" /></svg> },
-              { id: 6, name: "New Account High Value", desc: "Young accounts with disproportionate transaction volume", icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-6 h-6"><path d="M12 2v20M2 12h20" strokeLinecap="round" /><path d="M12 2l4 4M12 2L8 6" strokeLinecap="round" /></svg> },
-              { id: 7, name: "Income Mismatch", desc: "Transaction values vastly exceed account balance patterns", icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-6 h-6"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6" strokeLinecap="round" strokeLinejoin="round" /></svg> },
-              { id: 8, name: "Post-Mobile-Change Spike", desc: "Activity surges 7x after mobile number update", icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-6 h-6"><rect x="5" y="2" width="14" height="20" rx="2" /><path d="M12 18h.01" strokeLinecap="round" /></svg> },
-              { id: 9, name: "Round Amount Patterns", desc: "Overuse of exact round amounts (1K, 5K, 10K, 50K)", icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-6 h-6"><circle cx="12" cy="12" r="10" /><path d="M8 12h8M12 8v8" strokeLinecap="round" /></svg> },
-              { id: 10, name: "Layered / Subtle", desc: "Weak multi-signal combinations that evade single-rule detection", icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-6 h-6"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" strokeLinecap="round" strokeLinejoin="round" /></svg> },
-              { id: 11, name: "Salary Cycle Exploitation", desc: "Laundering timed to coincide with salary credit windows", icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-6 h-6"><rect x="3" y="4" width="18" height="18" rx="2" /><path d="M16 2v4M8 2v4M3 10h18" strokeLinecap="round" /></svg> },
-              { id: 12, name: "Branch-Level Collusion", desc: "Suspicious account clusters originating from the same branch", icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-6 h-6"><path d="M3 21h18M5 21V7l7-4 7 4v14M9 21v-6h6v6" strokeLinecap="round" strokeLinejoin="round" /></svg> },
-            ].map((p) => (
-              <div key={p.id} className="group rounded-xl border border-border bg-surface-raised p-6 transition-all hover:border-accent/30 hover:shadow-[0_0_20px_rgba(0,212,170,0.05)]">
-                <div className="mb-3 flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-accent/10 text-accent transition-colors group-hover:bg-accent/20">{p.icon}</div>
-                  <span className="text-xs font-mono text-[#666]">#{p.id}</span>
-                </div>
-                <h3 className="font-bold">{p.name}</h3>
-                <p className="mt-1 text-sm leading-relaxed text-[#a0a0a0]">{p.desc}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Visualizations */}
-      <section id="visualizations" className="border-t border-border/50 px-4 py-16 sm:px-6 sm:py-24">
-        <div className="mx-auto max-w-7xl">
-          <div className="mb-4 text-xs font-mono uppercase tracking-[0.2em] text-accent">
-            Exploratory Data Analysis
-          </div>
-          <h2 className="text-3xl font-black tracking-tight sm:text-4xl md:text-5xl">
-            25 Visualizations
-          </h2>
-          <p className="mt-4 max-w-xl text-[#a0a0a0]">
-            47 statistical tables, 25 analytical plots, and a full written report
-            covering every aspect of mule account behavior.
-          </p>
-
-          <div className="mt-8 flex flex-wrap gap-4">
-            <a href="/report" target="_blank" rel="noopener noreferrer" className="inline-flex h-12 items-center gap-2 rounded-full bg-accent px-8 text-sm font-semibold text-surface transition-all hover:scale-[1.02] hover:shadow-[0_0_30px_rgba(0,212,170,0.3)] active:scale-[0.98]">
-              <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
-                <path d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" />
-              </svg>
-              Read Full EDA Report
-            </a>
-            <a href="https://github.com/divyamohan1993/nfpc-mule-detection/tree/main/reports" target="_blank" rel="noopener noreferrer" className="inline-flex h-12 items-center gap-2 rounded-full border border-border px-8 text-sm font-medium text-[#a0a0a0] transition-all hover:border-[#444] hover:text-[#f0f0f0]">
-              View on GitHub
-            </a>
-          </div>
-
-          <div className="mt-12">
-            <LightboxGallery images={HIGHLIGHT_PLOTS.map((p) => ({ src: `/plots/${p.file}`, alt: p.label }))} />
-          </div>
-
-          <p className="mt-8 text-sm text-[#666]">
-            Showing 6 of 25 visualizations.{" "}
-            <a href="/report" target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">Full report</a>{" "}
-            includes class distribution, channel analysis, temporal patterns, geographic analysis, and more.
-          </p>
-        </div>
-      </section>
-
-      {/* Technical Approach */}
-      <section className="border-t border-border/50 px-4 py-16 sm:px-6 sm:py-24">
-        <div className="mx-auto max-w-7xl">
-          <div className="mb-4 text-xs font-mono uppercase tracking-[0.2em] text-accent">
-            Methodology
-          </div>
-          <h2 className="text-3xl font-black tracking-tight sm:text-4xl md:text-5xl">
-            How It Works
-          </h2>
-
-          <div className="mt-12 grid gap-8 lg:grid-cols-4">
-            {[
-              { step: "01", title: "Data Ingestion", desc: "160K accounts, 400M+ transactions spanning July 2020 - June 2025. Memory-efficient batch processing over 16 GB Parquet dataset." },
-              { step: "02", title: "Feature Engineering", desc: "208 features in 4 passes: transaction core, extended patterns, static account metadata, and graph/network metrics (PageRank, Louvain, betweenness)." },
-              { step: "03", title: "Label Cleaning", desc: "2-round confident learning + heuristic noise scoring for 7 red herring categories. Sample weights in [0.2, 1.0]." },
-              { step: "04", title: "Model Training", desc: "LightGBM + XGBoost + CatBoost ensemble with 3-seed x 5-fold CV, rank averaging, Optuna HPO. Frequency encoding to prevent leakage." },
-            ].map((s) => (
-              <div key={s.step} className="relative pl-16">
-                <div className="absolute left-0 top-0 flex h-12 w-12 items-center justify-center rounded-xl border border-accent/30 bg-accent/5 text-lg font-black text-accent">{s.step}</div>
-                <h3 className="text-lg font-bold">{s.title}</h3>
-                <p className="mt-2 text-sm leading-relaxed text-[#a0a0a0]">{s.desc}</p>
-              </div>
-            ))}
-          </div>
-
-          <div className="mt-16 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
-            {[
-              { label: "Statistical Methods", items: ["Confident Learning", "Kolmogorov-Smirnov", "SHAP TreeExplainer", "Bonferroni correction"] },
-              { label: "ML Models", items: ["LightGBM (GBDT)", "XGBoost", "CatBoost", "Rank Averaging Ensemble"] },
-              { label: "Graph / Network", items: ["PageRank & HITS", "Louvain Communities", "Betweenness Centrality", "Clustering Coefficients"] },
-              { label: "Tech Stack", items: ["Python 3.10+", "Pandas / NumPy / NetworkX", "Optuna HPO", "GCP n2-highmem-8"] },
-            ].map((g) => (
-              <div key={g.label} className="rounded-xl border border-border bg-surface-raised p-6">
-                <h4 className="mb-3 text-sm font-bold text-accent">{g.label}</h4>
-                <ul className="space-y-2">
-                  {g.items.map((item) => (
-                    <li key={item} className="flex items-center gap-2 text-sm text-[#a0a0a0]">
-                      <span className="h-1 w-1 rounded-full bg-accent/50" />
-                      {item}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Footer */}
-      <footer className="border-t border-border/50 px-4 py-10 sm:px-6 sm:py-16">
-        <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-6 sm:flex-row">
-          <div>
-            <div className="text-sm font-semibold">NFPC Mule Account Detection</div>
-            <div className="mt-1 text-xs text-[#666]">
-              Divya Mohan &amp; Kumkum Thakur &middot; Team dmj.one &middot; RBIH x IIT Delhi TRYST 2025
-            </div>
-          </div>
-          <div className="flex items-center gap-6 text-xs text-[#666]">
-            <a href="https://github.com/divyamohan1993/nfpc-mule-detection" target="_blank" rel="noopener noreferrer" className="transition-colors hover:text-accent">GitHub</a>
-            <a href="/pitch" className="transition-colors hover:text-accent">Pitch Deck</a>
-            <a href="https://dmj.one" target="_blank" rel="noopener noreferrer" className="transition-colors hover:text-accent">dmj.one</a>
-            <span>MIT License</span>
-          </div>
-        </div>
-      </footer>
-    </div>
+    <Suspense fallback={
+      <div className="flex min-h-screen items-center justify-center bg-[#c5d0be]">
+        <div className="h-10 w-10 animate-spin rounded-full border-4 border-[#14776b] border-t-transparent" />
+      </div>
+    }>
+      <AppContent />
+    </Suspense>
   );
 }

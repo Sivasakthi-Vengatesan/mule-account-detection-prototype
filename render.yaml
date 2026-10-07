@@ -1,0 +1,56 @@
+# Render.com Blueprint Infrastructure as Code
+# Learn more at: https://render.com/docs/blueprint-spec
+
+services:
+  # ============================================================================
+  # 1. FastAPI Machine Learning Inference Backend
+  # ============================================================================
+  - type: web
+    name: mule-detection-backend
+    runtime: python
+    region: oregon
+    plan: starter
+    rootDir: backend
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: CORS_ORIGINS
+        value: "*"
+      - key: DATABASE_URL
+        value: sqlite:///./mule_detection.db
+      - key: RISK_THRESHOLD_CRITICAL
+        value: "0.85"
+      - key: RISK_THRESHOLD_HIGH
+        value: "0.65"
+      - key: RISK_THRESHOLD_MEDIUM
+        value: "0.35"
+
+  # ============================================================================
+  # 2. Next.js Claymorphism Dashboard Frontend
+  # ============================================================================
+  - type: web
+    name: mule-detection-frontend
+    runtime: node
+    region: oregon
+    plan: starter
+    rootDir: web
+    buildCommand: npm install && npm run build
+    startCommand: npm run start -- -p $PORT
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: BACKEND_URL
+        fromService:
+          type: web
+          name: mule-detection-backend
+          property: host
+      - key: NEXT_PUBLIC_API_URL
+        fromService:
+          type: web
+          name: mule-detection-backend
+          property: host
